@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ffffff">
+  <title>Таймер 30 / 15 секунд</title>
+  <style>
+    :root {
+      font-family: Arial, Helvetica, sans-serif;
+      color: #0752d6;
+      background: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #ffffff; }
+    body { min-height: 100vh; min-height: 100dvh; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    main {
+      width: min(920px, 100%);
+      min-height: 100vh;
+      min-height: 100dvh;
+      margin: 0 auto;
+      padding: clamp(20px, 5vw, 52px) 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: clamp(18px, 4vh, 32px);
+    }
+    h1 { margin: 0; font-size: clamp(25px, 3.5vw, 38px); font-weight: 700; }
+    .settings { width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px; }
+    label { font-size: clamp(19px, 2.3vw, 25px); font-weight: 600; }
+    input[type="number"] {
+      width: 112px;
+      min-height: 58px;
+      padding: 8px 12px;
+      border: 2px solid #0752d6;
+      border-radius: 12px;
+      color: #0752d6;
+      background: #ffffff;
+      text-align: center;
+      font-size: 27px;
+      font-weight: bold;
+    }
+    input:disabled { background: #f2f6ff; opacity: 1; }
+    .hint { font-size: clamp(16px, 1.8vw, 19px); margin: 0; }
+    .sound-option { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+    .sound-option input { width: 22px; height: 22px; accent-color: #0752d6; cursor: pointer; }
+    .sound-option span { font-size: 19px; font-weight: 600; }
+
+    .cycle { font-size: clamp(22px, 3vw, 32px); font-weight: 700; }
+    .phase {
+      min-height: 1.2em;
+      font-size: clamp(28px, 4.5vw, 52px);
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+    .clock {
+      font-size: clamp(105px, 22vw, 250px);
+      font-weight: 700;
+      line-height: .95;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.07em;
+      padding-right: .07em;
+      white-space: nowrap;
+    }
+    .progress {
+      overflow: hidden;
+      width: min(660px, 88vw);
+      height: 16px;
+      border-radius: 99px;
+      background: #e5eeff;
+      border: 1px solid #afc9ff;
+    }
+    .bar { background: #0752d6; height: 100%; width: 0%; transition: width .08s linear; }
+    .controls { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; }
+    button {
+      min-width: 145px;
+      min-height: 58px;
+      border-radius: 12px;
+      border: 2px solid #0752d6;
+      padding: 12px 18px;
+      font-size: 22px;
+      font-weight: 700;
+      color: #0752d6;
+      background: #ffffff;
+    }
+    button.primary { background: #0752d6; color: #ffffff; }
+    button:disabled { opacity: .35; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible { outline: 3px solid #6a9cff; outline-offset: 3px; }
+    .sr-only { position: absolute; height: 1px; width: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+    @media (max-width: 500px) {
+      main { gap: 23px; }
+      .clock { font-size: clamp(100px, 26vw, 160px); }
+      button { min-width: 120px; font-size: 19px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Таймер 30 / 15</h1>
+    <section class="settings" aria-label="Настройка таймера">
+      <label for="repetitions">Количество циклов:</label>
+      <input id="repetitions" type="number" min="1" max="999" step="1" value="5" inputmode="numeric" aria-describedby="hint">
+    </section>
+    <p id="hint" class="hint">Один цикл: 30 секунд отсчёта + 15 секунд перерыва</p>
+    <label class="sound-option" for="soundEnabled">
+      <input type="checkbox" id="soundEnabled" checked>
+      <span>Звуковые сигналы включены</span>
+    </label>
+    <div id="cycle" class="cycle">Готов к запуску</div>
+    <div id="phase" class="phase" aria-live="polite">ОТСЧЁТ</div>
+    <div id="clock" class="clock" role="timer" aria-label="Осталось 30 секунд">00:30</div>
+    <div class="progress" role="progressbar" aria-label="Прогресс текущего этапа" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress"><div class="bar" id="bar"></div></div>
+    <div class="controls">
+      <button id="start" class="primary" type="button">Старт</button>
+      <button id="pause" type="button" disabled>Пауза</button>
+      <button id="reset" type="button" disabled>Сброс</button>
+    </div>
+    <div id="status" class="sr-only" role="status" aria-live="polite"></div>
+  </main>
+  <script>
+    'use strict';
+    const WORK = 30_000;
+    const REST = 15_000;
+    const PERIOD = WORK + REST;
+    const input = document.getElementById('repetitions');
+    const cycleEl = document.getElementById('cycle');
+    const phaseEl = document.getElementById('phase');
+    const clockEl = document.getElementById('clock');
+    const bar = document.getElementById('bar');
+    const progress = document.getElementById('progress');
+    const startBtn = document.getElementById('start');
+    const pauseBtn = document.getElementById('pause');
+    const resetBtn = document.getElementById('reset');
+    const statusEl = document.getElementById('status');
+    const soundEnabled = document.getElementById('soundEnabled');
+    let cycles = 5;
+    let state = 'idle'; // idle | running | paused | done
+    let elapsedBeforeResume = 0;
+    let startedAt = 0;
+    let intervalId = null;
+    let lastStage = '';
+    let lastWarning = '';
+    let audioContext = null;
+    let soundGeneration = 0;
+
+    // Звуки создаются в браузере — интернет и аудиофайлы не нужны.
+    function prepareAudio() {
+      if (!soundEnabled.checked) return;
+      try {
+        if (!audioContext) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContextClass) return;
+          audioContext = new AudioContextClass();
+        }
+        if (audioContext.state === 'suspended') {
+          audioContext.resume().catch(() => {});
+        }
+      } catch (_) { /* Таймер продолжает работать, даже если аудио недоступно. */ }
+    }
+    function tone(frequency, startDelay, duration, loudness = 0.13) {
+      if (!soundEnabled.checked || !audioContext || audioContext.state === 'closed') return;
+      try {
+        const oscillator = audioContext.createOscillator();
+        const envelope = audioContext.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        oscillator.connect(envelope);
+        envelope.connect(audioContext.destination);
+        const at = audioContext.currentTime + startDelay;
+        envelope.gain.setValueAtTime(0.0001, at);
+        envelope.gain.exponentialRampToValueAtTime(loudness, at + 0.012);
+        envelope.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+        oscillator.start(at);
+        oscillator.stop(at + duration + 0.02);
+      } catch (_) {}
+    }
+    function playSignal(type) {
+      if (!soundEnabled.checked) return;
+      prepareAudio();
+      if (type === 'work') {
+        tone(740, 0, .20);
+        tone(960, .24, .24);
+      } else if (type === 'rest') {
+        tone(530, 0, .32);
+        tone(430, .36, .32);
+      } else if (type === 'warning') {
+        tone(880, 0, .105, .085);
+      } else if (type === 'done') {
+        tone(660, 0, .19);
+        tone(830, .23, .19);
+        tone(1046, .46, .48);
+      }
+    }
+
+    function readCycles() {
+      const value = Number(input.value);
+      if (!Number.isInteger(value) || value < 1 || value > 999) {
+        input.setCustomValidity('Введите целое число от 1 до 999.');
+        input.reportValidity();
+        return null;
+      }
+      input.setCustomValidity('');
+      return value;
+    }
+    function formatTime(ms) {
+      const seconds = Math.max(0, Math.ceil(ms / 1000));
+      return String(Math.floor(seconds / 60)).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0');
+    }
+    function setProgress(pct) {
+      const value = Math.max(0, Math.min(100, pct));
+      bar.style.width = value + '%';
+      progress.setAttribute('aria-valuenow', String(Math.round(value)));
+    }
+    function getElapsed() {
+      return state === 'running' ? elapsedBeforeResume + (performance.now() - startedAt) : elapsedBeforeResume;
+    }
+    function announceStage(key, message) {
+      if (lastStage !== key) {
+        lastStage = key;
+        statusEl.textContent = message;
+        if (key === 'done') playSignal('done');
+        else playSignal(key.endsWith('-work') ? 'work' : 'rest');
+      }
+    }
+    function draw() {
+      const elapsed = Math.min(getElapsed(), cycles * PERIOD);
+      if (state === 'done' || elapsed >= cycles * PERIOD) {
+        finish();
+        return;
+      }
+      const index = Math.floor(elapsed / PERIOD);
+      const offset = elapsed - index * PERIOD;
+      const isWork = offset < WORK;
+      const phaseLength = isWork ? WORK : REST;
+      const used = isWork ? offset : offset - WORK;
+      const left = phaseLength - used;
+      cycleEl.textContent = `Цикл ${index + 1} из ${cycles}`;
+      phaseEl.textContent = isWork ? 'ОТСЧЁТ' : 'ПЕРЕРЫВ';
+      clockEl.textContent = formatTime(left);
+      clockEl.setAttribute('aria-label', `Осталось ${Math.ceil(left / 1000)} секунд`);
+      setProgress(used / phaseLength * 100);
+      const stageKey = `${index}-${isWork ? 'work' : 'rest'}`;
+      announceStage(stageKey, isWork ? `Цикл ${index + 1}. Отсчёт 30 секунд.` : `Цикл ${index + 1}. Перерыв 15 секунд.`);
+      const remainingSeconds = Math.ceil(left / 1000);
+      const warningKey = `${stageKey}-${remainingSeconds}`;
+      if (state === 'running' && remainingSeconds <= 3 && remainingSeconds >= 1 && lastWarning !== warningKey) {
+        lastWarning = warningKey;
+        playSignal('warning');
+      }
+    }
+    function stopTicker() {
+      if (intervalId !== null) clearInterval(intervalId);
+      intervalId = null;
+    }
+    function finish() {
+      stopTicker();
+      state = 'done';
+      elapsedBeforeResume = cycles * PERIOD;
+      cycleEl.textContent = `Выполнено циклов: ${cycles}`;
+      phaseEl.textContent = 'ГОТОВО!';
+      clockEl.textContent = '00:00';
+      clockEl.setAttribute('aria-label', 'Таймер завершён');
+      setProgress(100);
+      input.disabled = false;
+      startBtn.textContent = 'Заново';
+      startBtn.disabled = false;
+      pauseBtn.disabled = true;
+      resetBtn.disabled = false;
+      announceStage('done', `Готово! Все ${cycles} циклов завершены.`);
+    }
+    function startNew() {
+      const selected = readCycles();
+      if (selected === null) return;
+      cycles = selected;
+      elapsedBeforeResume = 0;
+      lastStage = '';
+      lastWarning = '';
+      prepareAudio();
+      state = 'running';
+      startedAt = performance.now();
+      input.disabled = true;
+      startBtn.disabled = true;
+      startBtn.textContent = 'Старт';
+      pauseBtn.disabled = false;
+      resetBtn.disabled = false;
+      draw();
+      stopTicker();
+      intervalId = setInterval(draw, 50);
+    }
+    function resume() {
+      state = 'running';
+      startedAt = performance.now();
+      startBtn.disabled = true;
+      pauseBtn.disabled = false;
+      draw();
+      stopTicker();
+      intervalId = setInterval(draw, 50);
+    }
+    soundEnabled.addEventListener('change', () => {
+      soundEnabled.nextElementSibling.textContent = soundEnabled.checked
+        ? 'Звуковые сигналы включены' : 'Звуковые сигналы выключены';
+      if (soundEnabled.checked) prepareAudio();
+    });
+    startBtn.addEventListener('click', () => {
+      if (state === 'paused') { prepareAudio(); resume(); }
+      else if (state === 'idle' || state === 'done') startNew();
+    });
+    pauseBtn.addEventListener('click', () => {
+      if (state !== 'running') return;
+      elapsedBeforeResume = getElapsed();
+      stopTicker();
+      state = 'paused';
+      startBtn.textContent = 'Продолжить';
+      startBtn.disabled = false;
+      pauseBtn.disabled = true;
+      statusEl.textContent = 'Таймер на паузе.';
+      draw();
+    });
+    resetBtn.addEventListener('click', () => {
+      stopTicker();
+      state = 'idle';
+      elapsedBeforeResume = 0;
+      lastStage = '';
+      lastWarning = '';
+      input.disabled = false;
+      startBtn.textContent = 'Старт';
+      startBtn.disabled = false;
+      pauseBtn.disabled = true;
+      resetBtn.disabled = true;
+      cycleEl.textContent = 'Готов к запуску';
+      phaseEl.textContent = 'ОТСЧЁТ';
+      clockEl.textContent = '00:30';
+      clockEl.setAttribute('aria-label', 'Осталось 30 секунд');
+      setProgress(0);
+      statusEl.textContent = 'Таймер сброшен.';
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (state === 'running' && !document.hidden) draw();
+    });
+  </script>
+</body>
+</html>
